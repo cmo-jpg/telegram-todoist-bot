@@ -3,8 +3,8 @@ import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 
-TELEGRAM_BOT_TOKEN = os.getenv("7614849431:AAH42r-B3PPtF0bBcP40NyiTU1-6IRkk3-Q")
-TODOIST_TOKEN = os.getenv("42a8f3d6ef01aee6ff162534547d9fe50d868fd4")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TODOIST_TOKEN = os.getenv("TODOIST_TOKEN")
 TODOIST_PROJECT_ID = os.getenv("TODOIST_PROJECT_ID")
 BASE_URL = os.getenv("BASE_URL")  # типу https://yourapp.onrender.com
 
