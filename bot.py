@@ -90,19 +90,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (msg.caption or msg.text or "").strip()
 
     # add info if forwarded
-    if msg.forward_date:
-        from_hint = []
-        if msg.forward_from_chat:
-            from_hint.append(
-                f"from chat: {msg.forward_from_chat.title or msg.forward_from_chat.username}"
-            )
-        if msg.forward_from:
-            from_hint.append(
-                f"from user: @{msg.forward_from.username or msg.forward_from.full_name}"
-            )
-        if from_hint:
-            hint = " | ".join(from_hint)
-            text = (text + f"\n\n>> Forwarded: {hint}").strip()
+  async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+
+    # caption для медіа, або просто text
+    text = (getattr(msg, "caption", None) or getattr(msg, "text", "") or "").strip()
+
+    # НОВЕ: перевіряємо forward_origin (а не forward_date)
+    origin = getattr(msg, "forward_origin", None)
+    if origin:
+        parts = []
+
+        # Спробуємо дістати ім'я користувача, якщо форвард від юзера
+        user = getattr(origin, "sender_user", None)
+        if user:
+            uname = None
+            if getattr(user, "username", None):
+                uname = f"@{user.username}"
+            else:
+                # full_name є у PTB 21, але підстрахуємось
+                full_name = getattr(user, "full_name", None) or f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+                uname = full_name or "user"
+            parts.append(f"user: {uname}")
+
+        # Якщо форвард із чату/каналу
+        chat = getattr(origin, "sender_chat", None) or getattr(origin, "chat", None)
+        if chat:
+            ch_name = getattr(chat, "title", None) or getattr(chat, "username", None) or "chat"
+            parts.append(f"chat: {ch_name}")
+
+        # Дата форварду (якщо доступна)
+        fdate = getattr(origin, "date", None)
+        if fdate:
+            try:
+                parts.append(f"at {fdate.isoformat()}")
+            except Exception:
+                pass
+
+        if parts:
+            text = (text + f"\n\n>> Forwarded: " + " | ".join(parts)).strip()
 
     if not text:
         await msg.reply_text("Немає тексту/підпису, який можна перетворити на задачу.")
