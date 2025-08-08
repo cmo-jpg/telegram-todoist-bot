@@ -114,29 +114,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     if not TELEGRAM_BOT_TOKEN or not TODOIST_TOKEN:
-        raise RuntimeError(
-            "Не задані змінні оточення TELEGRAM_BOT_TOKEN / TODOIST_TOKEN."
-        )
+        raise RuntimeError("Не задані змінні TELEGRAM_BOT_TOKEN / TODOIST_TOKEN.")
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), handle_message))
 
     port = int(os.getenv("PORT", "8080"))
+    on_render = os.getenv("PORT") is not None  # Render ставить PORT
 
-    if BASE_URL:
-        # Render / webhook mode
+    if on_render:
+        # → режим webhook на Render
+        # (опц.) можна гарантовано прибрати старий webhook і поставити новий:
+        # але run_webhook з webhook_url це і так робить
         app.run_webhook(
             listen="0.0.0.0",
             port=port,
-            webhook_url=f"{BASE_URL}/webhook",
+            webhook_url=f"{BASE_URL}/webhook" if BASE_URL else None,
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
         )
     else:
-        # Local dev fallback
+        # → локальний режим polling: спершу знімаємо webhook, щоб не було 409
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(
+            app.bot.delete_webhook(drop_pending_updates=True)
+        )
         app.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
