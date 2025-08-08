@@ -1,30 +1,45 @@
 import os
+import logging
 import requests
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-# ---- ENV ----
+# ---------- LOGGING ----------
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    level=logging.INFO,
+)
+log = logging.getLogger("telegram-todoist-bot")
+
+# ---------- ENV ----------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TODOIST_TOKEN = os.getenv("TODOIST_TOKEN")
 TODOIST_PROJECT_ID = os.getenv("TODOIST_PROJECT_ID")  # optional
 BASE_URL = os.getenv("BASE_URL")  # e.g. https://yourapp.onrender.com
+PORT = int(os.getenv("PORT", "8080"))
 
 TODOIST_API_URL = "https://api.todoist.com/rest/v2/tasks"
 
 
-# ---- Todoist helpers ----
+# ---------- TODOIST HELPERS ----------
 def build_todoist_payload(text: str) -> dict:
     """
-    Rules:
-      - "Title >> description" -> description field
+    Правила:
+      - "Title >> description" -> description
       - "due:today|tomorrow|monday|2025-08-10" -> due_string
-      - "!p1..p4" -> priority (4 is highest in Todoist)
-      - TODOIST_PROJECT_ID -> to a specific project, else Inbox
+      - "!p1..p4" -> priority (4 = найвищий у Todoist)
+      - TODOIST_PROJECT_ID -> якщо заданий, відправляємо в конкретний проект
     """
     text = (text or "").strip()
     payload = {"content": text[:1000] or "Нове завдання"}
 
-    # Split Title >> Description
+    # Title >> Description
     if ">>" in text:
         title, desc = text.split(">>", 1)
         payload["content"] = (title.strip() or "Нове завдання")[:1000]
@@ -62,7 +77,7 @@ def create_todoist_task(text: str) -> tuple[bool, str]:
     }
     payload = build_todoist_payload(text)
     try:
-        r = requests.post(TODOIST_API_URL, headers=headers, json=payload, timeout=10)
+        r = requests.post(TODOIST_API_URL, headers=headers, json=payload, timeout=15)
         if r.status_code in (200, 204):
             return True, "Завдання створено."
         if r.status_code == 409:
@@ -72,7 +87,7 @@ def create_todoist_task(text: str) -> tuple[bool, str]:
         return False, f"Помилка мережі: {e}"
 
 
-# ---- Telegram handlers ----
+# ---------- TELEGRAM HANDLERS ----------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привіт! Надішліть або перешліть мені повідомлення — я створю задачу в Todoist.\n\n"
@@ -86,29 +101,20 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
 
-    # take caption first (for media), else text
-    text = (msg.caption or msg.text or "").strip()
-
-    # add info if forwarded
-  async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.effective_message
-
     # caption для медіа, або просто text
     text = (getattr(msg, "caption", None) or getattr(msg, "text", "") or "").strip()
 
-    # НОВЕ: перевіряємо forward_origin (а не forward_date)
+    # PTB v21: замість forward_date використовуємо forward_origin
     origin = getattr(msg, "forward_origin", None)
     if origin:
         parts = []
 
-        # Спробуємо дістати ім'я користувача, якщо форвард від юзера
+        # Якщо форвард від юзера
         user = getattr(origin, "sender_user", None)
         if user:
-            uname = None
             if getattr(user, "username", None):
                 uname = f"@{user.username}"
             else:
-                # full_name є у PTB 21, але підстрахуємось
                 full_name = getattr(user, "full_name", None) or f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
                 uname = full_name or "user"
             parts.append(f"user: {uname}")
@@ -138,36 +144,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text(info)
 
 
+# ---------- APP START ----------
 def main():
     if not TELEGRAM_BOT_TOKEN or not TODOIST_TOKEN:
-        raise RuntimeError("Не задані змінні TELEGRAM_BOT_TOKEN / TODOIST_TOKEN.")
+        raise RuntimeError("Не задані змінні оточення TELEGRAM_BOT_TOKEN / TODOIST_TOKEN.")
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), handle_message))
 
-    port = int(os.getenv("PORT", "8080"))
-    on_render = os.getenv("PORT") is not None  # Render ставить PORT
+    on_render = os.getenv("PORT") is not None  # Render задає PORT
 
     if on_render:
-        # → режим webhook на Render
-        # (опц.) можна гарантовано прибрати старий webhook і поставити новий:
-        # але run_webhook з webhook_url це і так робить
-     app.run_webhook(
-    listen="0.0.0.0",
-    port=int(os.getenv("PORT", "8080")),
-    webhook_url=f"{BASE_URL}/webhook",
-    url_path="webhook",             # ← ДОДАЛИ ЦЕ
-    drop_pending_updates=True,
-    allowed_updates=Update.ALL_TYPES,
+        # На Render завжди піднімаємо вебсервер (щоб пройшов port scan).
+        # Якщо BASE_URL заданий — Telegram отримає повний webhook_url.
+        log.info("Starting in WEBHOOK mode on Render. Port=%s, BASE_URL=%s", PORT, BASE_URL)
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            webhook_url=f"{BASE_URL}/webhook" if BASE_URL else None,
+            url_path="webhook",  # важливо: саме цей шлях повинен збігатися з /webhook
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
         )
     else:
-        # → локальний режим polling: спершу знімаємо webhook, щоб не було 409
+        # Локально: спершу знімаємо вебхук, потім polling (щоб не було конфлікту з getUpdates).
         import asyncio
+        log.info("Starting in POLLING mode locally.")
         asyncio.get_event_loop().run_until_complete(
             app.bot.delete_webhook(drop_pending_updates=True)
         )
         app.run_polling(allowed_updates=Update.ALL_TYPES)
 
+
 if __name__ == "__main__":
+    log.info("Booting telegram-todoist-bot...")
     main()
