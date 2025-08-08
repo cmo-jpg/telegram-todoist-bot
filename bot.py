@@ -127,12 +127,13 @@ def main():
         # → режим webhook на Render
         # (опц.) можна гарантовано прибрати старий webhook і поставити новий:
         # але run_webhook з webhook_url це і так робить
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            webhook_url=f"{BASE_URL}/webhook" if BASE_URL else None,
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES,
+     app.run_webhook(
+    listen="0.0.0.0",
+    port=int(os.getenv("PORT", "8080")),
+    webhook_url=f"{BASE_URL}/webhook",
+    url_path="webhook",             # ← ДОДАЛИ ЦЕ
+    drop_pending_updates=True,
+    allowed_updates=Update.ALL_TYPES,
         )
     else:
         # → локальний режим polling: спершу знімаємо webhook, щоб не було 409
